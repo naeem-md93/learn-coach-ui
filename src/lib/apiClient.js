@@ -4,7 +4,7 @@
 
 import { getAccessToken, getRefreshToken, setTokens, clearTokens } from './tokenStorage'
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8008'
+export const SERVICE_BASE_URL = import.meta.env.VITE_SERVICE_BASE_URL || 'http://localhost:8008'
 
 export class ApiError extends Error {
   constructor(message, { status, fieldErrors } = {}) {
@@ -56,7 +56,7 @@ async function parseErrorResponse(response) {
  * on non-OK responses.
  */
 async function request(path, { method = 'GET', body, auth = true, headers = {}, skipRefresh = false } = {}) {
-  const url = `${API_BASE_URL}${path}`
+  const url = `${SERVICE_BASE_URL}${path}`
 
   const finalHeaders = {
     'Content-Type': 'application/json',
