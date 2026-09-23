@@ -1,0 +1,29 @@
+// Thin wrapper around localStorage for auth tokens.
+// localStorage is used for simplicity at this stage — it is readable by any
+// JS on the page (XSS risk) unlike an httpOnly cookie. Revisit if/when the
+// backend can issue httpOnly session cookies instead.
+
+const ACCESS_KEY = 'learnCoach.accessToken'
+const REFRESH_KEY = 'learnCoach.refreshToken'
+
+export function getAccessToken() {
+  return localStorage.getItem(ACCESS_KEY)
+}
+
+export function getRefreshToken() {
+  return localStorage.getItem(REFRESH_KEY)
+}
+
+export function setTokens({ access, refresh } = {}) {
+  if (access) localStorage.setItem(ACCESS_KEY, access)
+  if (refresh) localStorage.setItem(REFRESH_KEY, refresh)
+}
+
+export function setAccessToken(access) {
+  if (access) localStorage.setItem(ACCESS_KEY, access)
+}
+
+export function clearTokens() {
+  localStorage.removeItem(ACCESS_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+}

@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --color-background: #0D1117;
+  --color-foreground: #E6EDF3;
+  --color-card: #161B22;
+  --color-card-foreground: #E6EDF3;
+  --color-card-hover: #1C2128;
+  --color-primary: #4F8EF7;
+  --color-primary-foreground: #0D1117;
+  --color-primary-muted: #1d3a6e;
+  --color-secondary: #21262D;
+  --color-secondary-foreground: #C9D1D9;
+  --color-muted: #1C2128;
+  --color-muted-foreground: #8B949E;
+  --color-accent: #7C5CFC;
+  --color-accent-foreground: #FFFFFF;
+  --color-border: #30363D;
+  --color-ring: #4F8EF7;
+  --color-success: #3FB950;
+  --color-danger: #F85149;
+  --color-warning: #FFA657;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+  --font-family-mono: 'JetBrains Mono', monospace;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+html {
+  direction: ltr;
+}
+
+body {
+  background-color: #0D1117;
+  color: #E6EDF3;
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #30363D;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8B949E;
+}
+
+.scroll-container:hover::-webkit-scrollbar-thumb {
+  opacity: 1;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.dot-pulse span {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8B949E;
+  margin: 0 2px;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+.dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
+.dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
