@@ -1,17 +1,30 @@
 import { useState, useRef } from 'react'
 import Sidebar from '../components/Sidebar'
-import { subjectLabels } from '../data'
+import { uploadResource } from '../lib/resourcesApi'
+import { ApiError } from '../lib/apiClient'
 
-const subjects = ['Biology', 'Mathematics', 'Statistics', 'Electronics', 'Physics']
+// Backend enum values (lowercase, per CONTEXT.md Subject glossary) paired
+// with display labels. Keep the value the source of truth sent to the API.
+const subjects = [
+  { value: 'biology', label: 'Biology' },
+  { value: 'mathematics', label: 'Mathematics' },
+  { value: 'statistics', label: 'Statistics' },
+  { value: 'electronics', label: 'Electronics' },
+]
+
+const resourceTypes = [
+  { value: 'book', label: 'Book' },
+  { value: 'paper', label: 'Article / Paper' },
+]
 
 export default function UploadPage({ onNavigate }) {
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState(null)
   const [subject, setSubject] = useState('')
-  const [type, setType] = useState('')
+  const [resourceType, setResourceType] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [done, setDone] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState(null)
+  const [uploaded, setUploaded] = useState(null)
   const inputRef = useRef(null)
 
   const handleDrop = (e) => {
@@ -21,22 +34,36 @@ export default function UploadPage({ onNavigate }) {
     if (f && f.type === 'application/pdf') setFile(f)
   }
 
-  const handleUpload = () => {
-    if (!file || !subject || !type) return
+  const handleUpload = async () => {
+    if (!file || !subject || !resourceType || uploading) return
     setUploading(true)
-    let p = 0
-    const interval = setInterval(() => {
-      p += Math.random() * 15 + 5
-      if (p >= 100) {
-        p = 100
-        clearInterval(interval)
-        setTimeout(() => { setDone(true) }, 400)
-      }
-      setProgress(Math.min(p, 100))
-    }, 200)
+    setError(null)
+    try {
+      const resource = await uploadResource({ file, resourceType, subject })
+      setUploaded(resource)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Upload failed. Please try again.')
+    } finally {
+      setUploading(false)
+    }
   }
 
-  if (done) {
+  const resetForm = () => {
+    setFile(null)
+    setUploaded(null)
+    setError(null)
+    setSubject('')
+    setResourceType('')
+  }
+
+  if (uploaded) {
+    // Django may still be waiting on title extraction to fully "settle" by
+    // the time we get here (sync but can be slow) — title_status can be
+    // pending/failed; fall back to the filename either way per the task.
+    const isPending = uploaded.title_status === 'pending'
+    const isFailed = uploaded.title_status === 'failed'
+    const displayTitle = uploaded.title || file?.name
+
     return (
       <div className="flex min-h-screen bg-background">
         <Sidebar currentPage="dashboard" onNavigate={onNavigate} />
@@ -46,12 +73,18 @@ export default function UploadPage({ onNavigate }) {
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3FB950" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <h2 className="text-xl font-semibold text-foreground mb-2">Upload successful</h2>
-            <p className="text-muted-foreground text-sm mb-6">&ldquo;{file?.name}&rdquo; has been added to your library.</p>
-            <div className="flex gap-3 justify-center">
+            <p className="text-muted-foreground text-sm mb-2">&ldquo;{displayTitle}&rdquo; has been added to your library.</p>
+            {isPending && (
+              <p className="text-xs text-warning mb-4">Title is still being processed — it will update shortly.</p>
+            )}
+            {isFailed && (
+              <p className="text-xs text-danger mb-4">Title extraction failed — showing the file name instead.</p>
+            )}
+            <div className="flex gap-3 justify-center mt-4">
               <button onClick={() => onNavigate('dashboard')} className="px-5 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
                 Go to Library
               </button>
-              <button onClick={() => { setFile(null); setDone(false); setProgress(0); setUploading(false) }} className="px-5 py-2.5 border border-border rounded-lg text-sm font-medium text-foreground hover:bg-secondary transition-colors">
+              <button onClick={resetForm} className="px-5 py-2.5 border border-border rounded-lg text-sm font-medium text-foreground hover:bg-secondary transition-colors">
                 Upload another
               </button>
             </div>
@@ -74,17 +107,25 @@ export default function UploadPage({ onNavigate }) {
           <h1 className="text-2xl font-semibold text-foreground mb-1">Upload New Resource</h1>
           <p className="text-muted-foreground text-sm mb-8">Upload a PDF of a book or scientific article.</p>
 
+          {error && (
+            <div className="mb-6 px-4 py-3 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm">
+              {error}
+            </div>
+          )}
+
           {/* Drop zone */}
           <div
-            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+            onDragOver={(e) => { e.preventDefault(); if (!uploading) setDragging(true) }}
             onDragLeave={() => setDragging(false)}
-            onDrop={handleDrop}
-            onClick={() => inputRef.current?.click()}
-            className={`relative border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${
+            onDrop={uploading ? undefined : handleDrop}
+            onClick={() => { if (!uploading) inputRef.current?.click() }}
+            className={`relative border-2 border-dashed rounded-xl p-12 text-center transition-all ${
+              uploading ? 'cursor-not-allowed opacity-70 border-border' : 'cursor-pointer'
+            } ${
               dragging ? 'border-primary bg-primary/5' : file ? 'border-success/50 bg-success/5' : 'border-border hover:border-primary/50 hover:bg-secondary/50'
             }`}
           >
-            <input ref={inputRef} type="file" accept=".pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f) }} />
+            <input ref={inputRef} type="file" accept=".pdf" className="hidden" disabled={uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f) }} />
             {file ? (
               <div>
                 <div className="w-12 h-12 rounded-xl bg-success/10 flex items-center justify-center mx-auto mb-3">
@@ -94,7 +135,9 @@ export default function UploadPage({ onNavigate }) {
                 </div>
                 <p className="font-medium text-foreground text-sm">{file.name}</p>
                 <p className="text-xs text-muted-foreground mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                <button onClick={(e) => { e.stopPropagation(); setFile(null) }} className="mt-3 text-xs text-danger hover:underline">Remove file</button>
+                {!uploading && (
+                  <button onClick={(e) => { e.stopPropagation(); setFile(null) }} className="mt-3 text-xs text-danger hover:underline">Remove file</button>
+                )}
               </div>
             ) : (
               <div>
@@ -118,26 +161,29 @@ export default function UploadPage({ onNavigate }) {
               <select
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-secondary border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-ring transition-colors appearance-none"
+                disabled={uploading}
+                className="w-full px-3.5 py-2.5 bg-secondary border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-ring transition-colors appearance-none disabled:opacity-60"
               >
                 <option value="">Select...</option>
                 {subjects.map((s) => (
-                  <option key={s} value={s}>{subjectLabels[s]}</option>
+                  <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-1.5">Resource type</label>
               <div className="flex gap-2">
-                {['book', 'article'].map((t) => (
+                {resourceTypes.map((t) => (
                   <button
-                    key={t}
-                    onClick={() => setType(t)}
-                    className={`flex-1 py-2.5 border rounded-lg text-sm font-medium transition-colors ${
-                      type === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground'
+                    key={t.value}
+                    type="button"
+                    disabled={uploading}
+                    onClick={() => setResourceType(t.value)}
+                    className={`flex-1 py-2.5 border rounded-lg text-sm font-medium transition-colors disabled:opacity-60 ${
+                      resourceType === t.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground'
                     }`}
                   >
-                    {t === 'book' ? 'Book' : 'Article'}
+                    {t.label}
                   </button>
                 ))}
               </div>
@@ -146,12 +192,9 @@ export default function UploadPage({ onNavigate }) {
 
           {uploading && (
             <div className="mt-6 bg-card border border-border rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-foreground">Uploading and processing...</span>
-                <span className="text-sm font-mono text-primary">{Math.round(progress)}%</span>
-              </div>
-              <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+              <div className="flex items-center gap-3">
+                <span className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin shrink-0" />
+                <span className="text-sm text-foreground">Uploading and processing — this can take a few seconds while we extract the title...</span>
               </div>
             </div>
           )}
@@ -159,7 +202,7 @@ export default function UploadPage({ onNavigate }) {
           {!uploading && (
             <button
               onClick={handleUpload}
-              disabled={!file || !subject || !type}
+              disabled={!file || !subject || !resourceType}
               className="mt-6 w-full py-3 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               Upload and start processing

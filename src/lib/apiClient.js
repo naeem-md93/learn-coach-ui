@@ -54,13 +54,19 @@ async function parseErrorResponse(response) {
  * Low-level request helper: builds the URL, attaches JSON headers and the
  * bearer token (if present and not explicitly skipped), and throws ApiError
  * on non-OK responses.
+ *
+ * Pass `isFormData: true` when `body` is already a `FormData` instance (e.g.
+ * file uploads) — in that case the body is sent as-is and no `Content-Type`
+ * header is set manually, so the browser can attach the correct multipart
+ * boundary itself. Everything else (auth header, 401 refresh-and-retry,
+ * timeout, error normalization) is shared with the JSON path.
  */
-async function request(path, { method = 'GET', body, auth = true, headers = {}, skipRefresh = false } = {}) {
+async function request(path, { method = 'GET', body, auth = true, headers = {}, skipRefresh = false, isFormData = false } = {}) {
   const url = `${SERVICE_BASE_URL}${path}`
 
-  const finalHeaders = {
-    'Content-Type': 'application/json',
-    ...headers,
+  const finalHeaders = { ...headers }
+  if (!isFormData) {
+    finalHeaders['Content-Type'] = 'application/json'
   }
 
   if (auth) {
@@ -70,16 +76,18 @@ async function request(path, { method = 'GET', body, auth = true, headers = {}, 
 
   // Guard against a hung connection (e.g. DNS/IPv6 fallback delays, or the
   // backend simply being down) so the UI never gets stuck in a loading
-  // state indefinitely.
+  // state indefinitely. File uploads get a longer budget since Django waits
+  // synchronously on FastAPI for title extraction (per CONTEXT.md) and a
+  // large PDF upload itself can take a while on slow connections.
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 15000)
+  const timeoutId = setTimeout(() => controller.abort(), isFormData ? 60000 : 15000)
 
   let response
   try {
     response = await fetch(url, {
       method,
       headers: finalHeaders,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isFormData ? body : (body !== undefined ? JSON.stringify(body) : undefined),
       signal: controller.signal,
     })
   } catch {
@@ -92,7 +100,7 @@ async function request(path, { method = 'GET', body, auth = true, headers = {}, 
   if (response.status === 401 && auth && !skipRefresh) {
     const refreshed = await tryRefreshAccessToken()
     if (refreshed) {
-      return request(path, { method, body, auth, headers, skipRefresh: true })
+      return request(path, { method, body, auth, headers, skipRefresh: true, isFormData })
     }
     clearTokens()
     const { message, fieldErrors } = await parseErrorResponse(response)
@@ -158,4 +166,7 @@ export const apiClient = {
   post: (path, body, options) => request(path, { ...options, method: 'POST', body }),
   patch: (path, body, options) => request(path, { ...options, method: 'PATCH', body }),
   delete: (path, options) => request(path, { ...options, method: 'DELETE' }),
+  // For multipart/form-data bodies (file uploads). `formData` must be a
+  // FormData instance; the browser sets the Content-Type/boundary itself.
+  postForm: (path, formData, options) => request(path, { ...options, method: 'POST', body: formData, isFormData: true }),
 }
