@@ -1,23 +1,66 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
-import { mockResources, subjectColors, subjectLabels } from '../data'
+import { listResources, deleteResource } from '../lib/resourcesApi'
+import { ApiError } from '../lib/apiClient'
 
-const subjects = ['all', 'Biology', 'Mathematics', 'Statistics', 'Electronics']
-const subjectAllLabel = { all: 'All', ...subjectLabels }
+// Backend enum values (per CONTEXT.md Subject glossary) paired with display
+// labels/colors. Keep values lowercase to match what the API sends back.
+const subjectMeta = {
+  biology: { label: 'Biology', bg: 'bg-success/10', text: 'text-success' },
+  mathematics: { label: 'Mathematics', bg: 'bg-primary/10', text: 'text-primary' },
+  statistics: { label: 'Statistics', bg: 'bg-accent/10', text: 'text-accent' },
+  electronics: { label: 'Electronics', bg: 'bg-warning/10', text: 'text-warning' },
+}
+
+const filters = [{ value: 'all', label: 'All' }, ...Object.entries(subjectMeta).map(([value, m]) => ({ value, label: m.label }))]
+
+const resourceTypeLabels = { book: 'Book', paper: 'Article' }
 
 export default function DashboardPage({ onNavigate, onOpenResource }) {
+  const [resources, setResources] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
   const [view, setView] = useState('grid')
   const [search, setSearch] = useState('')
+  const [deletingId, setDeletingId] = useState(null)
 
-  const filtered = mockResources.filter((r) => {
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await listResources()
+        if (!cancelled) setResources(Array.isArray(data) ? data : [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Failed to load your library.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
+
+  const handleDelete = async (resource) => {
+    if (!window.confirm(`Delete "${resource.title || 'this resource'}"? This cannot be undone.`)) return
+    setDeletingId(resource.id)
+    try {
+      await deleteResource(resource.id)
+      setResources((prev) => prev.filter((r) => r.id !== resource.id))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete resource.')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const filtered = resources.filter((r) => {
     if (filter !== 'all' && r.subject !== filter) return false
-    if (search && !r.title.includes(search)) return false
+    if (search && !(r.title || '').toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
-
-  const totalRead = mockResources.reduce((a, r) => a + r.readPages, 0)
-  const totalPages = mockResources.reduce((a, r) => a + r.pages, 0)
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -25,27 +68,27 @@ export default function DashboardPage({ onNavigate, onOpenResource }) {
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto p-8">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold text-foreground mb-1">My Library</h1>
-            <p className="text-muted-foreground text-sm">
-              {mockResources.length} resources — {totalRead} of {totalPages} pages read
-            </p>
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold text-foreground mb-1">My Library</h1>
+              <p className="text-muted-foreground text-sm">
+                {loading ? 'Loading resources...' : `${resources.length} resource${resources.length === 1 ? '' : 's'}`}
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigate('upload')}
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+            >
+              Upload New Resource
+            </button>
           </div>
 
-          {/* Stats row */}
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            {[
-              { label: 'Resources uploaded', value: mockResources.length, icon: '📚' },
-              { label: 'Study sessions', value: '23', icon: '⏱' },
-              { label: 'Quizzes taken', value: '8', icon: '✅' },
-            ].map((stat) => (
-              <div key={stat.label} className="bg-card border border-border rounded-xl p-5">
-                <p className="text-2xl mb-1">{stat.icon}</p>
-                <p className="text-xl font-semibold text-foreground">{stat.value}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
-              </div>
-            ))}
-          </div>
+          {error && (
+            <div className="mb-6 px-4 py-3 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm flex items-center justify-between">
+              <span>{error}</span>
+              <button onClick={() => setError(null)} className="text-xs underline shrink-0 ml-4">Dismiss</button>
+            </div>
+          )}
 
           {/* Toolbar */}
           <div className="flex items-center gap-3 mb-5 flex-wrap">
@@ -63,15 +106,15 @@ export default function DashboardPage({ onNavigate, onOpenResource }) {
             </div>
 
             <div className="flex gap-1 bg-secondary border border-border rounded-lg p-0.5">
-              {subjects.map((s) => (
+              {filters.map((f) => (
                 <button
-                  key={s}
-                  onClick={() => setFilter(s)}
+                  key={f.value}
+                  onClick={() => setFilter(f.value)}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    filter === s ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    filter === f.value ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  {subjectAllLabel[s]}
+                  {f.label}
                 </button>
               ))}
             </div>
@@ -94,16 +137,50 @@ export default function DashboardPage({ onNavigate, onOpenResource }) {
           </div>
 
           {/* Resources */}
-          {view === 'grid' ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-24 text-muted-foreground text-sm gap-3">
+              <span className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              Loading your library...
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <p className="text-foreground font-medium mb-1">
+                {resources.length === 0 ? 'Your library is empty' : 'No resources match your filters'}
+              </p>
+              <p className="text-muted-foreground text-sm mb-5">
+                {resources.length === 0 ? 'Upload a PDF book or article to get started.' : 'Try a different search or subject filter.'}
+              </p>
+              {resources.length === 0 && (
+                <button
+                  onClick={() => onNavigate('upload')}
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+                >
+                  Upload a resource
+                </button>
+              )}
+            </div>
+          ) : view === 'grid' ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {filtered.map((resource) => (
-                <ResourceCard key={resource.id} resource={resource} onOpen={onOpenResource} />
+                <ResourceCard
+                  key={resource.id}
+                  resource={resource}
+                  onOpen={onOpenResource}
+                  onDelete={handleDelete}
+                  deleting={deletingId === resource.id}
+                />
               ))}
             </div>
           ) : (
             <div className="flex flex-col gap-2">
               {filtered.map((resource) => (
-                <ResourceRow key={resource.id} resource={resource} onOpen={onOpenResource} />
+                <ResourceRow
+                  key={resource.id}
+                  resource={resource}
+                  onOpen={onOpenResource}
+                  onDelete={handleDelete}
+                  deleting={deletingId === resource.id}
+                />
               ))}
             </div>
           )}
@@ -113,69 +190,97 @@ export default function DashboardPage({ onNavigate, onOpenResource }) {
   )
 }
 
-function ResourceCard({ resource, onOpen }) {
-  const sc = subjectColors[resource.subject]
-  const pct = Math.round((resource.readPages / resource.pages) * 100)
+function DeleteButton({ resource, onDelete, deleting, className = '' }) {
   return (
     <button
-      onClick={() => onOpen(resource)}
-      className="group bg-card border border-border rounded-xl overflow-hidden hover:border-primary/40 hover:bg-card-hover transition-all text-left"
+      onClick={(e) => { e.stopPropagation(); onDelete(resource) }}
+      disabled={deleting}
+      title="Delete resource"
+      className={`p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors disabled:opacity-50 ${className}`}
     >
-      <div className="h-36 bg-secondary relative overflow-hidden">
-        <img src={resource.cover} alt={resource.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" />
-        <div className="absolute inset-0 bg-gradient-to-t from-card/80 to-transparent" />
-        <div className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.text}`}>
-          {subjectLabels[resource.subject]}
-        </div>
-        {pct === 100 && (
-          <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-success flex items-center justify-center">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0D1117" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
-        )}
-      </div>
-      <div className="p-3">
-        <p className="text-xs text-muted-foreground mb-1">{resource.type === 'book' ? 'Book' : 'Article'} · {resource.pages} pages</p>
-        <h3 className="text-sm font-medium text-foreground leading-snug mb-3 line-clamp-2">{resource.title}</h3>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
-            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
-          </div>
-          <span className="text-[10px] font-mono text-muted-foreground">{pct}%</span>
-        </div>
-      </div>
+      {deleting ? (
+        <span className="block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+        </svg>
+      )}
     </button>
   )
 }
 
-function ResourceRow({ resource, onOpen }) {
-  const sc = subjectColors[resource.subject]
-  const pct = Math.round((resource.readPages / resource.pages) * 100)
+function TitleStatusBadge({ status }) {
+  if (status === 'pending') {
+    return <span className="text-[10px] text-warning">Processing title...</span>
+  }
+  if (status === 'failed') {
+    return <span className="text-[10px] text-danger">Title unavailable</span>
+  }
+  return null
+}
+
+function ResourceCard({ resource, onOpen, onDelete, deleting }) {
+  const sc = subjectMeta[resource.subject] || { label: resource.subject, bg: 'bg-secondary', text: 'text-muted-foreground' }
+  const title = resource.title || resource.file_name || 'Untitled resource'
+
   return (
-    <button
-      onClick={() => onOpen(resource)}
-      className="group flex items-center gap-4 bg-card border border-border rounded-xl p-4 hover:border-primary/40 hover:bg-card-hover transition-all text-left"
-    >
-      <div className="w-10 h-10 rounded-lg bg-secondary overflow-hidden shrink-0">
-        <img src={resource.cover} alt={resource.title} className="w-full h-full object-cover opacity-70" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <h3 className="text-sm font-medium text-foreground truncate">{resource.title}</h3>
-          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.text}`}>
-            {subjectLabels[resource.subject]}
-          </span>
+    <div className="group relative bg-card border border-border rounded-xl overflow-hidden hover:border-primary/40 hover:bg-card-hover transition-all text-left">
+      <button onClick={() => onOpen(resource)} className="block w-full text-left">
+        <div className="h-24 bg-secondary relative overflow-hidden flex items-center justify-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8B949E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <div className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.text}`}>
+            {sc.label}
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">{resource.type === 'book' ? 'Book' : 'Article'} · {resource.readPages}/{resource.pages} pages</p>
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="w-24 h-1.5 bg-secondary rounded-full overflow-hidden">
-          <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
+        <div className="p-3">
+          <p className="text-xs text-muted-foreground mb-1">{resourceTypeLabels[resource.resource_type] || resource.resource_type}</p>
+          <h3 className="text-sm font-medium text-foreground leading-snug mb-1 line-clamp-2">{title}</h3>
+          <TitleStatusBadge status={resource.title_status} />
         </div>
-        <span className="text-xs font-mono text-muted-foreground w-8 text-right">{pct}%</span>
-      </div>
+      </button>
+      <DeleteButton resource={resource} onDelete={onDelete} deleting={deleting} className="absolute top-2 right-2 bg-card/90 opacity-0 group-hover:opacity-100" />
+    </div>
+  )
+}
+
+function ResourceRow({ resource, onOpen, onDelete, deleting }) {
+  const sc = subjectMeta[resource.subject] || { label: resource.subject, bg: 'bg-secondary', text: 'text-muted-foreground' }
+  const title = resource.title || resource.file_name || 'Untitled resource'
+
+  return (
+    <div className="group flex items-center gap-4 bg-card border border-border rounded-xl p-4 hover:border-primary/40 hover:bg-card-hover transition-all">
+      <button onClick={() => onOpen(resource)} className="flex items-center gap-4 flex-1 min-w-0 text-left">
+        <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8B949E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <h3 className="text-sm font-medium text-foreground truncate">{title}</h3>
+            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.text}`}>
+              {sc.label}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {resourceTypeLabels[resource.resource_type] || resource.resource_type}
+            {resource.title_status && resource.title_status !== 'ready' && (
+              <>
+                {' '}·{' '}
+                <span className={resource.title_status === 'failed' ? 'text-danger' : 'text-warning'}>
+                  {resource.title_status === 'failed' ? 'Title unavailable' : 'Processing title...'}
+                </span>
+              </>
+            )}
+          </p>
+        </div>
+      </button>
+      <DeleteButton resource={resource} onDelete={onDelete} deleting={deleting} />
       <svg className="text-muted-foreground group-hover:text-foreground transition-colors" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="9 18 15 12 9 6" />
       </svg>
-    </button>
+    </div>
   )
 }
